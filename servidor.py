@@ -11,10 +11,9 @@ CORS(app)
 DB_NAME = 'shopee_produtos.db'
 
 def init_db():
-    """Inicializa o banco de dados SQLite com as tabelas de produtos e vendas"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Tabela de Produtos (Custos)
+    # Tabela de Produtos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id TEXT PRIMARY KEY,
@@ -22,8 +21,7 @@ def init_db():
             custo REAL
         )
     ''')
-    # NOVA TABELA: Vendas (Histórico Eterno)
-    # A 'chave' é a combinação de ID Pedido + SKU + Qtd para evitar duplicados
+    # Tabela de Vendas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vendas (
             chave TEXT PRIMARY KEY,
@@ -38,132 +36,78 @@ def init_db():
             receita_bruta REAL
         )
     ''')
+    # NOVA TABELA: Saldo (Pagamentos Recebidos)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS saldo (
+            chave TEXT PRIMARY KEY,
+            data TEXT,
+            tipo TEXT,
+            descricao TEXT,
+            id_pedido TEXT,
+            direcao TEXT,
+            valor REAL,
+            status TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
 @app.route('/')
 def home():
-    return "Servidor da Calculadora Shopee Online - Ativo e Pronto!"
+    return "Servidor Shopee Pro - Ativo"
 
-# --- ROTAS DE PRODUTOS (CUSTOS) ---
-
-@app.route('/upload', methods=['POST'])
-def upload_csv():
-    if 'file' not in request.files:
-        return jsonify({"erro": "Nenhum arquivo enviado"}), 400
-    
-    file = request.files['file']
-    
-    try:
-        content = file.read()
-        try:
-            df = pd.read_csv(io.BytesIO(content), sep=';', encoding='iso-8859-1', engine='python', on_bad_lines='skip')
-        except Exception:
-            df = pd.read_csv(io.BytesIO(content), sep=';', encoding='utf-8', engine='python', on_bad_lines='skip')
-
-        mapeamento = {
-            'PRODUTO_ID': 'id',
-            'DESCRICAO': 'descricao',
-            'PRECO_CUSTO': 'custo'
-        }
-
-        for col_origem in mapeamento.keys():
-            if col_origem not in df.columns:
-                return jsonify({"erro": f"Coluna '{col_origem}' não encontrada na planilha."}), 400
-
-        df_final = df[list(mapeamento.keys())].copy()
-        df_final.rename(columns=mapeamento, inplace=True)
-
-        df_final['id'] = df_final['id'].astype(str).str.strip()
-        df_final['custo'] = df_final['custo'].astype(str).str.replace(',', '.').str.strip()
-        df_final['custo'] = pd.to_numeric(df_final['custo'], errors='coerce')
-        df_final = df_final.dropna(subset=['id', 'custo'])
-        df_final = df_final.drop_duplicates(subset=['id'])
-
-        conn = sqlite3.connect(DB_NAME)
-        df_final.to_sql('produtos', conn, if_exists='replace', index=False)
-        conn.close()
-        
-        return jsonify({"mensagem": f"Sucesso! {len(df_final)} produtos carregados corretamente."})
-    
-    except Exception as e:
-        return jsonify({"erro": f"Erro técnico ao processar: {str(e)}"}), 500
-
+# --- ROTAS DE PRODUTOS ---
 @app.route('/produtos/todos', methods=['GET'])
 def get_todos_produtos():
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, descricao, custo FROM produtos")
-        rows = cursor.fetchall()
-        conn.close()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, descricao, custo FROM produtos")
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify({str(r[0]): {"descricao": r[1], "custo": r[2]} for r in rows})
 
-        banco = {}
-        for row in rows:
-            banco[str(row[0])] = {
-                "descricao": row[1],
-                "custo": row[2]
-            }
-        return jsonify(banco)
-    except Exception as e:
-        return jsonify({"erro": f"Erro ao puxar todos os produtos: {str(e)}"}), 500
-
-# --- NOVAS ROTAS DE VENDAS (HISTÓRICO ETERNO) ---
-
+# --- ROTAS DE VENDAS ---
 @app.route('/vendas', methods=['GET'])
 def get_vendas():
-    """Retorna todas as vendas salvas para o dashboard"""
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id_pedido, rastreio, data_ori, sku, nome_produto, status, qtd, subtotal, receita_bruta FROM vendas")
-        rows = cursor.fetchall()
-        conn.close()
-
-        lista_vendas = []
-        for row in rows:
-            lista_vendas.append({
-                "id": row[0],
-                "rastreio": row[1],
-                "dataOri": row[2],
-                "sku": row[3],
-                "nome": row[4],
-                "status": row[5],
-                "qtd": row[6],
-                "subtotal": row[7],
-                "receitaBruta": row[8]
-            })
-        return jsonify(lista_vendas)
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id_pedido, rastreio, data_ori, sku, nome_produto, status, qtd, subtotal, receita_bruta FROM vendas")
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([{"id": r[0], "rastreio": r[1], "dataOri": r[2], "sku": r[3], "nome": r[4], "status": r[5], "qtd": r[6], "subtotal": r[7], "receitaBruta": r[8]} for r in rows])
 
 @app.route('/vendas/guardar', methods=['POST'])
 def guardar_vendas():
-    """Recebe novas vendas do HTML e salva/atualiza no banco de dados"""
-    try:
-        dados = request.json
-        vendas = dados.get('vendas', [])
-        
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        
-        for v in vendas:
-            # INSERT OR REPLACE: Se a chave (Pedido+SKU+Qtd) já existir, ele atualiza (bom para mudar status de 'A enviar' para 'Concluido')
-            cursor.execute('''
-                INSERT OR REPLACE INTO vendas 
-                (chave, id_pedido, rastreio, data_ori, sku, nome_produto, status, qtd, subtotal, receita_bruta)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                v['chave'], v['id'], v['rastreio'], v['dataOri'], 
-                v['sku'], v['nome'], v['status'], v['qtd'], 
-                v['subtotal'], v['receitaBruta']
-            ))
-            
-        conn.commit()
-        conn.close()
-        return jsonify({"mensagem": "Vendas integradas com sucesso!"}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    vendas = request.json.get('vendas', [])
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    for v in vendas:
+        cursor.execute('INSERT OR REPLACE INTO vendas VALUES (?,?,?,?,?,?,?,?,?,?)', (v['chave'], v['id'], v['rastreio'], v['dataOri'], v['sku'], v['nome'], v['status'], v['qtd'], v['subtotal'], v['receitaBruta']))
+    conn.commit()
+    conn.close()
+    return jsonify({"mensagem": "Vendas integradas"}), 200
+
+# --- NOVAS ROTAS DE SALDO ---
+@app.route('/saldo', methods=['GET'])
+def get_saldo():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT data, tipo, descricao, id_pedido, direcao, valor, status FROM saldo")
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify([{"data": r[0], "tipo": r[1], "descricao": r[2], "id_pedido": r[3], "direcao": r[4], "valor": r[5], "status": r[6]} for r in rows])
+
+@app.route('/saldo/guardar', methods=['POST'])
+def guardar_saldo():
+    transacoes = request.json.get('transacoes', [])
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    for t in transacoes:
+        cursor.execute('INSERT OR REPLACE INTO saldo VALUES (?,?,?,?,?,?,?,?)', 
+                       (t['chave'], t['data'], t['tipo'], t['descricao'], t['id_pedido'], t['direcao'], t['valor'], t['status']))
+    conn.commit()
+    conn.close()
+    return jsonify({"mensagem": "Transações de saldo integradas"}), 200
 
 if __name__ == '__main__':
     init_db()
