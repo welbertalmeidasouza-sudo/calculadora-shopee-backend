@@ -11,14 +11,31 @@ CORS(app)
 DB_NAME = 'shopee_produtos.db'
 
 def init_db():
-    """Inicializa o banco de dados SQLite"""
+    """Inicializa o banco de dados SQLite com as tabelas de produtos e vendas"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # Tabela de Produtos (Custos)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id TEXT PRIMARY KEY,
             descricao TEXT,
             custo REAL
+        )
+    ''')
+    # NOVA TABELA: Vendas (Histórico Eterno)
+    # A 'chave' é a combinação de ID Pedido + SKU + Qtd para evitar duplicados
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendas (
+            chave TEXT PRIMARY KEY,
+            id_pedido TEXT,
+            rastreio TEXT,
+            data_ori TEXT,
+            sku TEXT,
+            nome_produto TEXT,
+            status TEXT,
+            qtd INTEGER,
+            subtotal REAL,
+            receita_bruta REAL
         )
     ''')
     conn.commit()
@@ -27,6 +44,8 @@ def init_db():
 @app.route('/')
 def home():
     return "Servidor da Calculadora Shopee Online - Ativo e Pronto!"
+
+# --- ROTAS DE PRODUTOS (CUSTOS) ---
 
 @app.route('/upload', methods=['POST'])
 def upload_csv():
@@ -70,24 +89,6 @@ def upload_csv():
     except Exception as e:
         return jsonify({"erro": f"Erro técnico ao processar: {str(e)}"}), 500
 
-@app.route('/produto/<id_produto>', methods=['GET'])
-def get_produto(id_produto):
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT descricao, custo FROM produtos WHERE id = ?", (str(id_produto).strip(),))
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            return jsonify({"descricao": row[0], "custo": row[1]})
-        else:
-            return jsonify({"erro": "Produto não encontrado no banco de dados."}), 404
-            
-    except Exception as e:
-        return jsonify({"erro": f"Erro na consulta: {str(e)}"}), 500
-
-# ----- NOVA ROTA PARA O RELATÓRIO -----
 @app.route('/produtos/todos', methods=['GET'])
 def get_todos_produtos():
     try:
@@ -97,7 +98,6 @@ def get_todos_produtos():
         rows = cursor.fetchall()
         conn.close()
 
-        # O HTML espera um dicionário/objeto onde a chave é o ID (SKU)
         banco = {}
         for row in rows:
             banco[str(row[0])] = {
@@ -107,6 +107,63 @@ def get_todos_produtos():
         return jsonify(banco)
     except Exception as e:
         return jsonify({"erro": f"Erro ao puxar todos os produtos: {str(e)}"}), 500
+
+# --- NOVAS ROTAS DE VENDAS (HISTÓRICO ETERNO) ---
+
+@app.route('/vendas', methods=['GET'])
+def get_vendas():
+    """Retorna todas as vendas salvas para o dashboard"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id_pedido, rastreio, data_ori, sku, nome_produto, status, qtd, subtotal, receita_bruta FROM vendas")
+        rows = cursor.fetchall()
+        conn.close()
+
+        lista_vendas = []
+        for row in rows:
+            lista_vendas.append({
+                "id": row[0],
+                "rastreio": row[1],
+                "dataOri": row[2],
+                "sku": row[3],
+                "nome": row[4],
+                "status": row[5],
+                "qtd": row[6],
+                "subtotal": row[7],
+                "receitaBruta": row[8]
+            })
+        return jsonify(lista_vendas)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/vendas/guardar', methods=['POST'])
+def guardar_vendas():
+    """Recebe novas vendas do HTML e salva/atualiza no banco de dados"""
+    try:
+        dados = request.json
+        vendas = dados.get('vendas', [])
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        for v in vendas:
+            # INSERT OR REPLACE: Se a chave (Pedido+SKU+Qtd) já existir, ele atualiza (bom para mudar status de 'A enviar' para 'Concluido')
+            cursor.execute('''
+                INSERT OR REPLACE INTO vendas 
+                (chave, id_pedido, rastreio, data_ori, sku, nome_produto, status, qtd, subtotal, receita_bruta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                v['chave'], v['id'], v['rastreio'], v['dataOri'], 
+                v['sku'], v['nome'], v['status'], v['qtd'], 
+                v['subtotal'], v['receitaBruta']
+            ))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"mensagem": "Vendas integradas com sucesso!"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 if __name__ == '__main__':
     init_db()
