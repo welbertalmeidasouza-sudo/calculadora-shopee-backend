@@ -40,3 +40,15 @@ def guardar_vendas():
         return jsonify({"mensagem": "Sucesso"}), 200
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
+
+@vendas_bp.route('/vendas/limpar', methods=['DELETE'])
+def limpar_vendas():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM vendas") 
+        conn.commit()
+        conn.close()
+        return jsonify({"mensagem": "Vendas apagadas com sucesso"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
