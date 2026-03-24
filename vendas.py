@@ -14,7 +14,6 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Tabela 1: Vendas
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vendas (
                 chave TEXT PRIMARY KEY,
@@ -30,7 +29,6 @@ def init_db():
             );
         ''')
         
-        # Tabela 2: Configurações (Sua última digitação)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS configuracoes (
                 chave TEXT PRIMARY KEY,
@@ -38,7 +36,6 @@ def init_db():
             );
         ''')
 
-        # Tabela 3: Pagamentos em Carteira (NOVA!)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS pagamentos (
                 id_pedido TEXT PRIMARY KEY,
@@ -54,10 +51,7 @@ def init_db():
 
 init_db()
 
-# ==========================================
-# ROTAS DE CONFIGURAÇÕES
-# ==========================================
-
+# --- ROTAS DE CONFIGURAÇÕES ---
 @vendas_bp.route('/configuracoes', methods=['GET'])
 def get_configuracoes():
     try:
@@ -94,10 +88,7 @@ def salvar_configuracoes():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
-# ==========================================
-# ROTAS DE PAGAMENTOS (NOVA!)
-# ==========================================
-
+# --- ROTAS DE PAGAMENTOS ---
 @vendas_bp.route('/pagamentos', methods=['GET'])
 def listar_pagamentos():
     try:
@@ -131,10 +122,7 @@ def guardar_pagamentos():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
-# ==========================================
-# ROTAS DE VENDAS
-# ==========================================
-
+# --- ROTAS DE VENDAS ---
 @vendas_bp.route('/vendas', methods=['GET'])
 def listar_vendas():
     try:
@@ -179,9 +167,9 @@ def limpar_vendas():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM vendas") 
-        cursor.execute("DELETE FROM pagamentos") # Agora limpa os pagamentos também
+        cursor.execute("DELETE FROM pagamentos")
         conn.commit()
         conn.close()
-        return jsonify({"mensagem": "Vendas e Pagamentos apagados com sucesso"}), 200
+        return jsonify({"mensagem": "Vendas e Pagamentos apagados"}), 200
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
