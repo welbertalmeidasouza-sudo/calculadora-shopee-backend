@@ -13,6 +13,8 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Tabela de Vendas
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vendas (
                 chave TEXT PRIMARY KEY,
@@ -27,12 +29,66 @@ def init_db():
                 receita_bruta REAL
             );
         ''')
+        
+        # Nova Tabela de Configurações para salvar a Data
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS configuracoes (
+                chave TEXT PRIMARY KEY,
+                valor TEXT
+            );
+        ''')
+        
         conn.commit()
         conn.close()
     except Exception as e:
-        print("Aviso na criação da tabela vendas:", e)
+        print("Aviso na criação das tabelas:", e)
 
 init_db()
+
+# ==========================================
+# ROTAS DE CONFIGURAÇÕES (NOVA FUNCIONALIDADE)
+# ==========================================
+
+@vendas_bp.route('/configuracoes', methods=['GET'])
+def get_configuracoes():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'ultima_digitacao'")
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return jsonify({"ultima_digitacao": row['valor']})
+        else:
+            return jsonify({"ultima_digitacao": ""})
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@vendas_bp.route('/configuracoes', methods=['POST'])
+def salvar_configuracoes():
+    try:
+        dados = request.json
+        ultima_digitacao = dados.get('ultima_digitacao', '')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Salva ou atualiza a data no banco de dados
+        cursor.execute('''
+            INSERT INTO configuracoes (chave, valor)
+            VALUES ('ultima_digitacao', %s)
+            ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+        ''', (ultima_digitacao,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"status": "sucesso"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+# ==========================================
+# ROTAS DE VENDAS
+# ==========================================
 
 @vendas_bp.route('/vendas', methods=['GET'])
 def listar_vendas():
