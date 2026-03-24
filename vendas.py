@@ -14,7 +14,7 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Tabela de Vendas
+        # Tabela 1: Vendas
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vendas (
                 chave TEXT PRIMARY KEY,
@@ -30,11 +30,20 @@ def init_db():
             );
         ''')
         
-        # Nova Tabela de Configurações para salvar a Data
+        # Tabela 2: Configurações (Sua última digitação)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS configuracoes (
                 chave TEXT PRIMARY KEY,
                 valor TEXT
+            );
+        ''')
+
+        # Tabela 3: Pagamentos em Carteira (NOVA!)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pagamentos (
+                id_pedido TEXT PRIMARY KEY,
+                data_pagamento TEXT,
+                valor_recebido REAL
             );
         ''')
         
@@ -46,7 +55,7 @@ def init_db():
 init_db()
 
 # ==========================================
-# ROTAS DE CONFIGURAÇÕES (NOVA FUNCIONALIDADE)
+# ROTAS DE CONFIGURAÇÕES
 # ==========================================
 
 @vendas_bp.route('/configuracoes', methods=['GET'])
@@ -73,7 +82,6 @@ def salvar_configuracoes():
         
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Salva ou atualiza a data no banco de dados
         cursor.execute('''
             INSERT INTO configuracoes (chave, valor)
             VALUES ('ultima_digitacao', %s)
@@ -83,6 +91,43 @@ def salvar_configuracoes():
         conn.close()
         
         return jsonify({"status": "sucesso"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+# ==========================================
+# ROTAS DE PAGAMENTOS (NOVA!)
+# ==========================================
+
+@vendas_bp.route('/pagamentos', methods=['GET'])
+def listar_pagamentos():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT id_pedido, data_pagamento, valor_recebido FROM pagamentos")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@vendas_bp.route('/pagamentos/guardar', methods=['POST'])
+def guardar_pagamentos():
+    try:
+        dados = request.json
+        lista = dados.get('pagamentos', [])
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for p in lista:
+            cursor.execute('''
+                INSERT INTO pagamentos (id_pedido, data_pagamento, valor_recebido)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id_pedido) DO UPDATE SET
+                    data_pagamento = EXCLUDED.data_pagamento,
+                    valor_recebido = EXCLUDED.valor_recebido
+            ''', (p['id_pedido'], p['data_pagamento'], p['valor_recebido']))
+        conn.commit()
+        conn.close()
+        return jsonify({"mensagem": "Pagamentos salvos com sucesso"}), 200
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
@@ -134,8 +179,9 @@ def limpar_vendas():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM vendas") 
+        cursor.execute("DELETE FROM pagamentos") # Agora limpa os pagamentos também
         conn.commit()
         conn.close()
-        return jsonify({"mensagem": "Vendas apagadas com sucesso"}), 200
+        return jsonify({"mensagem": "Vendas e Pagamentos apagados com sucesso"}), 200
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
